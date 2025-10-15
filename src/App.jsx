@@ -1,20 +1,16 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
-import { 
-  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, 
-  BarChart, Bar, PieChart, Pie, Cell, ScatterChart, Scatter, Legend 
-} from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, ScatterChart, Scatter, Legend } from 'recharts';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CheckCircle, Info, BarChart as BarChartIcon } from 'lucide-react';
+import * as XLSX from 'xlsx';
+import { saveAs } from 'file-saver';
 import './index.css';
 
 const COLORS = ['#dc3545', '#ffc107', '#198754'];
 const PRIMARY_ACCENT = '#00897B';
-const ACCENT_GOLD = '#FFD700';
-const SECONDARY_COLOR = '#343a40';
 
-// URL do seu Google Apps Script
-const GAS_BASE_URL = 'https://script.google.com/macros/s/AKfycbxJP0pn4YlWbrJfZxNNRmX0a54u-SSpsmn2RABrltzjxWbWO83c_bMXb6QkqkCqRJl3/exec';
+const SHEET_URL = 'https://imc-nine-delta.vercel.app/api/sendToSheet';
 
 const FormField = ({ label, id, children, errors, tooltip = '' }) => (
   <div className="form-field">
@@ -34,74 +30,60 @@ const FormField = ({ label, id, children, errors, tooltip = '' }) => (
 export default function App() {
   const [successMessage, setSuccessMessage] = useState(false);
   const [view, setView] = useState('form');
-  const [entries, setEntries] = useState([]);
-
   const { register, handleSubmit, reset, formState: { errors } } = useForm({
     defaultValues: { sexo: 'Masculino', idade: 25, peso: 70, altura: 1.75, diabetes: 'Não', hipertensao: 'Não', habitos: 'Moderado' }
   });
 
-  // Funções de cálculo
+  const [entries, setEntries] = useState(() => {
+    try { const raw = localStorage.getItem('imc_entries_v2'); return raw ? JSON.parse(raw) : []; } catch { return []; }
+  });
+
+  useEffect(() => { localStorage.setItem('imc_entries_v2', JSON.stringify(entries)); }, [entries]);
+
   const calcIMC = (p, a) => Number((p / (a * a)).toFixed(2));
   const imcCategoria = i => i < 18.5 ? 'Abaixo do peso' : i < 25 ? 'Normal' : i < 30 ? 'Sobrepeso' : 'Obesidade';
   const riskGroup = ({ idade, imc, diabetes, hipertensao, habitos }) => {
     let s = 0;
     if (idade >= 60) s += 3; else if (idade >= 45) s += 2; else if (idade >= 30) s += 1;
     if (imc >= 30) s += 3; else if (imc >= 25) s += 1;
-    if (diabetes === 'Sim') s += 3; if (hipertensao === 'Sim') s += 2;
-    if (habitos === 'Ruim') s += 2; if (habitos === 'Saudável') s -= 1;
+    if (diabetes === 'Sim') s += 3; if (hipertensao === 'Sim') s += 2; if (habitos === 'Ruim') s += 2; if (habitos === 'Saudável') s -= 1;
     return s >= 6 ? 'Alto' : s >= 3 ? 'Moderado' : 'Baixo';
   };
 
-  // Envia dados para Google Sheets
   const sendToSheet = async (data) => {
     try {
-      const res = await fetch(GAS_BASE_URL, {
+      await fetch(SHEET_URL, {
         method: 'POST',
         body: JSON.stringify(data),
         headers: { 'Content-Type': 'application/json' },
       });
-      return res.json();
     } catch (err) {
       console.error('Erro ao enviar dados para Google Sheets:', err);
     }
   };
 
-  // Busca dados atualizados da planilha
-  const fetchSheetData = async () => {
-    try {
-      const res = await fetch(`${GAS_BASE_URL}?action=getData`);
-      const data = await res.json();
-      setEntries(data);
-    } catch (err) {
-      console.error('Erro ao buscar dados da planilha:', err);
-    }
-  };
-
-  useEffect(() => {
-    fetchSheetData();
-  }, []);
-
-  const onSubmit = async d => {
+  const onSubmit = d => {
     const imc = calcIMC(d.peso, d.altura);
     const entry = { id: Date.now(), ...d, imc, categoria: imcCategoria(imc), risco: riskGroup({ ...d, imc }) };
-
-    // Salva localmente e no Google Sheets
-    setEntries(e => [entry, ...e]);
+    setEntries(e => [entry, ...e].slice(0, 5000));
     reset();
     setSuccessMessage(true);
     setTimeout(() => setSuccessMessage(false), 3000);
 
-    await sendToSheet(entry);
-    await fetchSheetData(); // Atualiza tabela depois do POST
+    sendToSheet(entry);
   };
 
-  // Dados para gráficos
+  const exportExcel = (entries) => {
+    const ws = XLSX.utils.json_to_sheet(entries);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "IMC");
+    const buf = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+    saveAs(new Blob([buf], { type: "application/octet-stream" }), "dados_imc.xlsx");
+  };
+
   const imcBySexo = useMemo(() => {
     const map = {};
-    entries.forEach(e => {
-      if (!map[e.sexo]) map[e.sexo] = { sexo: e.sexo, sum: 0, c: 0 };
-      map[e.sexo].sum += e.imc; map[e.sexo].c++;
-    });
+    entries.forEach(e => { if (!map[e.sexo]) map[e.sexo] = { sexo: e.sexo, sum: 0, c: 0 }; map[e.sexo].sum += e.imc; map[e.sexo].c++; });
     return Object.values(map).map(m => ({ sexo: m.sexo, avgImc: (m.sum / m.c).toFixed(2) }));
   }, [entries]);
 
@@ -137,29 +119,23 @@ export default function App() {
                 <FormField label="Idade (anos)" id="idade" errors={errors.idade}>
                   <input type="number" {...register('idade', { required: true, min: 1, max: 120 })} />
                 </FormField>
-
                 <FormField label="Sexo" id="sexo">
                   <select {...register('sexo', { required: true })}>
                     <option>Masculino</option><option>Feminino</option><option>Outro</option>
                   </select>
                 </FormField>
-
                 <FormField label="Peso (kg)" id="peso" errors={errors.peso}>
                   <input type="number" step="0.1" {...register('peso', { required: true, min: 20, max: 300 })} />
                 </FormField>
-
                 <FormField label="Altura (m)" id="altura" errors={errors.altura}>
                   <input type="number" step="0.01" {...register('altura', { required: true, min: 0.5, max: 2.5 })} />
                 </FormField>
-
                 <FormField label="Diabetes" id="diabetes">
                   <select {...register('diabetes', { required: true })}><option>Não</option><option>Sim</option></select>
                 </FormField>
-
                 <FormField label="Hipertensão" id="hipertensao">
                   <select {...register('hipertensao', { required: true })}><option>Não</option><option>Sim</option></select>
                 </FormField>
-
                 <FormField label="Hábitos" id="habitos">
                   <select {...register('habitos', { required: true })}>
                     <option>Saudável</option><option>Moderado</option><option>Ruim</option>
@@ -169,6 +145,7 @@ export default function App() {
                 <div className="form-buttons">
                   <button type="submit" className="btn-primary">Salvar</button>
                   <button type="button" className="btn-secondary" onClick={() => reset()}>Limpar</button>
+                  <button type="button" className="btn-export" onClick={() => exportExcel(entries)}>Exportar XLS</button>
                 </div>
 
                 <AnimatePresence>
@@ -183,38 +160,50 @@ export default function App() {
           )}
 
           {view === 'charts' && (
-            <motion.div key="charts" className="charts-section" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}>
-              <h2>Análise de Dados</h2>
+            <motion.div key="charts" className="charts-section" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <div className="stats-card">
+                <p>Total de Registros</p>
+                <h3>{entries.length}</h3>
+              </div>
+
               <div className="chart-grid">
+                <div className="chart-card">
+                  <h3>IMC Médio por Gênero</h3>
+                  <ResponsiveContainer width="100%" height={250}>
+                    <BarChart data={imcBySexo}>
+                      <XAxis dataKey="sexo" />
+                      <YAxis />
+                      <Tooltip />
+                      <Bar dataKey="avgImc" fill={PRIMARY_ACCENT} radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
 
-                <ResponsiveContainer width="100%" height={250}>
-                  <BarChart data={imcBySexo}>
-                    <XAxis dataKey="sexo" />
-                    <YAxis />
-                    <Tooltip />
-                    <Bar dataKey="avgImc" fill={PRIMARY_ACCENT} />
-                  </BarChart>
-                </ResponsiveContainer>
+                <div className="chart-card">
+                  <h3>Distribuição de Risco</h3>
+                  <ResponsiveContainer width="100%" height={250}>
+                    <PieChart>
+                      <Pie data={riskDistribution} dataKey="value" nameKey="name" outerRadius={90} labelLine={false}
+                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}>
+                        {riskDistribution.map((e, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                      </Pie>
+                      <Legend />
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
 
-                <ResponsiveContainer width="100%" height={250}>
-                  <PieChart>
-                    <Pie data={riskDistribution} dataKey="value" nameKey="name" outerRadius={80} fill={ACCENT_GOLD} label>
-                      {riskDistribution.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
-                    </Pie>
-                    <Tooltip />
-                    <Legend />
-                  </PieChart>
-                </ResponsiveContainer>
-
-                <ResponsiveContainer width="100%" height={250}>
-                  <ScatterChart>
-                    <XAxis type="number" dataKey="idade" name="Idade" unit="anos" />
-                    <YAxis type="number" dataKey="imc" name="IMC" />
-                    <Tooltip cursor={{ strokeDasharray: '3 3' }} />
-                    <Scatter name="IMC x Idade" data={ageImcScatter} fill={PRIMARY_ACCENT} />
-                  </ScatterChart>
-                </ResponsiveContainer>
-
+                <div className="chart-card full">
+                  <h3>Idade x IMC (Scatter)</h3>
+                  <ResponsiveContainer width="100%" height={250}>
+                    <ScatterChart>
+                      <XAxis type="number" dataKey="idade" name="Idade" />
+                      <YAxis type="number" dataKey="imc" name="IMC" />
+                      <Tooltip cursor={{ strokeDasharray: '3 3' }} />
+                      <Scatter name="Diabetes" data={ageImcScatter} fill={PRIMARY_ACCENT} />
+                    </ScatterChart>
+                  </ResponsiveContainer>
+                </div>
               </div>
             </motion.div>
           )}
