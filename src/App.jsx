@@ -10,8 +10,13 @@ import './index.css';
 
 const COLORS = ['#dc3545', '#ffc107', '#198754'];
 const PRIMARY_ACCENT = '#00897B';
+const ACCENT_GOLD = '#FFD700';
+const SECONDARY_COLOR = '#343a40';
 
-// Componente reutilizável de campo do formulário
+// URL da API serverless
+const GET_DATA_URL = '/api/getSheetData';
+const SEND_DATA_URL = '/api/sendToSheet';
+
 const FormField = ({ label, id, children, errors, tooltip = '' }) => (
   <div className="form-field">
     <div className="form-label-container">
@@ -28,24 +33,37 @@ const FormField = ({ label, id, children, errors, tooltip = '' }) => (
 );
 
 export default function App() {
-  const [successMessage, setSuccessMessage] = useState(false);
-  const [view, setView] = useState('form');
   const [entries, setEntries] = useState([]);
+  const [view, setView] = useState('form');
+  const [successMessage, setSuccessMessage] = useState(false);
 
   const { register, handleSubmit, reset, formState: { errors } } = useForm({
-    defaultValues: {
-      sexo: 'Masculino',
-      idade: 25,
-      peso: 70,
-      altura: 1.75,
-      diabetes: 'Não',
-      hipertensao: 'Não',
-      habitos: 'Moderado'
-    }
+    defaultValues: { sexo: 'Masculino', idade: 25, peso: 70, altura: 1.75, diabetes: 'Não', hipertensao: 'Não', habitos: 'Moderado' }
   });
 
-  // Funções de cálculo
-  const calcIMC = (p, a) => Number((p / (a * a)).toFixed(2));
+  // Função para buscar dados da planilha
+  const fetchSheetData = async () => {
+    try {
+      const res = await fetch(GET_DATA_URL);
+      const data = await res.json();
+      // Converte os campos numéricos
+      const formatted = data.map(d => ({
+        ...d,
+        id: Number(d.id),
+        idade: Number(d.idade),
+        peso: Number(d.peso),
+        altura: Number(d.altura),
+        imc: Number(d.imc)
+      }));
+      setEntries(formatted.reverse()); // mostra os mais recentes primeiro
+    } catch (err) {
+      console.error('Erro ao buscar dados da planilha:', err);
+    }
+  };
+
+  useEffect(() => { fetchSheetData(); }, []);
+
+  const calcIMC = (peso, altura) => Number((peso / (altura * altura)).toFixed(2));
   const imcCategoria = i => i < 18.5 ? 'Abaixo do peso' : i < 25 ? 'Normal' : i < 30 ? 'Sobrepeso' : 'Obesidade';
   const riskGroup = ({ idade, imc, diabetes, hipertensao, habitos }) => {
     let s = 0;
@@ -58,64 +76,40 @@ export default function App() {
     return s >= 6 ? 'Alto' : s >= 3 ? 'Moderado' : 'Baixo';
   };
 
-  // Envia dados para Google Sheets via serverless
   const sendToSheet = async (data) => {
     try {
-      await fetch('/api/sendToSheet', {
+      const res = await fetch(SEND_DATA_URL, {
         method: 'POST',
-        body: JSON.stringify(data),
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
       });
+      await res.json();
     } catch (err) {
       console.error('Erro ao enviar dados para Google Sheets:', err);
     }
   };
 
-  // Busca os dados do Google Sheets ao montar o componente
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const res = await fetch('/api/getSheetData');
-        const data = await res.json();
-        const formatted = data.map(d => ({
-          id: Number(d.id),
-          idade: Number(d.idade),
-          sexo: d.sexo,
-          peso: Number(d.peso),
-          altura: Number(d.altura),
-          diabetes: d.diabetes,
-          hipertensao: d.hipertensao,
-          habitos: d.habitos,
-          imc: Number(d.imc),
-          categoria: d.categoria,
-          risco: d.risco
-        }));
-        setEntries(formatted);
-      } catch (err) {
-        console.error('Erro ao buscar dados da planilha:', err);
-      }
-    };
-
-    fetchData();
-  }, []);
-
-  const onSubmit = d => {
+  const onSubmit = async (d) => {
     const imc = calcIMC(d.peso, d.altura);
     const entry = { id: Date.now(), ...d, imc, categoria: imcCategoria(imc), risco: riskGroup({ ...d, imc }) };
-    setEntries(e => [entry, ...e]);
+    
+    // Envia para Google Sheets
+    await sendToSheet(entry);
+
+    // Atualiza dados da planilha
+    await fetchSheetData();
+
     reset();
     setSuccessMessage(true);
     setTimeout(() => setSuccessMessage(false), 3000);
-    sendToSheet(entry);
   };
 
-  // Dados para gráficos
   const imcBySexo = useMemo(() => {
     const map = {};
-    entries.forEach(e => { 
-      if (!map[e.sexo]) map[e.sexo] = { sexo: e.sexo, sum: 0, c: 0 }; 
-      map[e.sexo].sum += e.imc; 
-      map[e.sexo].c++; 
+    entries.forEach(e => {
+      if (!map[e.sexo]) map[e.sexo] = { sexo: e.sexo, sum: 0, c: 0 };
+      map[e.sexo].sum += e.imc;
+      map[e.sexo].c++;
     });
     return Object.values(map).map(m => ({ sexo: m.sexo, avgImc: (m.sum / m.c).toFixed(2) }));
   }, [entries]);
@@ -130,17 +124,12 @@ export default function App() {
 
   return (
     <div className="app-bg">
-      <motion.div initial={{ scale: 0.98, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring", stiffness: 100 }}
-        className="main-card">
+      <motion.div initial={{ scale: 0.98, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring", stiffness: 100 }} className="main-card">
         <header className="header">
           <h1>Painel de Saúde IMC <span className="badge">Análise</span></h1>
           <div className="button-group">
-            <button className={`tab-button ${view === 'form' ? 'active' : ''}`} onClick={() => setView('form')}>
-              <CheckCircle size={18} /> Registrar
-            </button>
-            <button className={`tab-button ${view === 'charts' ? 'active' : ''}`} onClick={() => setView('charts')}>
-              <BarChartIcon size={18} /> Análise
-            </button>
+            <button className={`tab-button ${view === 'form' ? 'active' : ''}`} onClick={() => setView('form')}><CheckCircle size={18} /> Registrar</button>
+            <button className={`tab-button ${view === 'charts' ? 'active' : ''}`} onClick={() => setView('charts')}><BarChartIcon size={18} /> Análise</button>
           </div>
         </header>
 
@@ -155,7 +144,9 @@ export default function App() {
 
                 <FormField label="Sexo" id="sexo">
                   <select {...register('sexo', { required: true })}>
-                    <option>Masculino</option><option>Feminino</option><option>Outro</option>
+                    <option>Masculino</option>
+                    <option>Feminino</option>
+                    <option>Outro</option>
                   </select>
                 </FormField>
 
@@ -177,7 +168,9 @@ export default function App() {
 
                 <FormField label="Hábitos" id="habitos">
                   <select {...register('habitos', { required: true })}>
-                    <option>Saudável</option><option>Moderado</option><option>Ruim</option>
+                    <option>Saudável</option>
+                    <option>Moderado</option>
+                    <option>Ruim</option>
                   </select>
                 </FormField>
 
