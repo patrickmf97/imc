@@ -1,17 +1,16 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, ScatterChart, Scatter, Legend } from 'recharts';
+import {
+  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  BarChart, Bar, PieChart, Pie, Cell,
+  ScatterChart, Scatter, Legend
+} from 'recharts';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CheckCircle, Info, BarChart as BarChartIcon } from 'lucide-react';
 import './index.css';
 
 const COLORS = ['#dc3545', '#ffc107', '#198754'];
 const PRIMARY_ACCENT = '#00897B';
-const ACCENT_GOLD = '#FFD700';
-const SECONDARY_COLOR = '#343a40';
-
-// URL do seu Apps Script
-const SHEET_URL = 'https://script.google.com/macros/s/AKfycbxJP0pn4YlWbrJfZxNNRmX0a54u-SSpsmn2RABrltzjxWbWO83c_bMXb6QkqkCqRJl3/exec';
 
 const FormField = ({ label, id, children, errors, tooltip = '' }) => (
   <div className="form-field">
@@ -41,23 +40,31 @@ export default function App() {
 
   useEffect(() => { localStorage.setItem('imc_entries_v2', JSON.stringify(entries)); }, [entries]);
 
-  const calcIMC = (p, a) => Number((p / (a * a)).toFixed(2));
+  const calcIMC = (peso, altura) => Number((peso / (altura * altura)).toFixed(2));
+
   const imcCategoria = i => i < 18.5 ? 'Abaixo do peso' : i < 25 ? 'Normal' : i < 30 ? 'Sobrepeso' : 'Obesidade';
+
   const riskGroup = ({ idade, imc, diabetes, hipertensao, habitos }) => {
     let s = 0;
     if (idade >= 60) s += 3; else if (idade >= 45) s += 2; else if (idade >= 30) s += 1;
     if (imc >= 30) s += 3; else if (imc >= 25) s += 1;
-    if (diabetes === 'Sim') s += 3; if (hipertensao === 'Sim') s += 2; if (habitos === 'Ruim') s += 2; if (habitos === 'Saudável') s -= 1;
+    if (diabetes === 'Sim') s += 3;
+    if (hipertensao === 'Sim') s += 2;
+    if (habitos === 'Ruim') s += 2;
+    if (habitos === 'Saudável') s -= 1;
     return s >= 6 ? 'Alto' : s >= 3 ? 'Moderado' : 'Baixo';
   };
 
+  // Função serverless
   const sendToSheet = async (data) => {
     try {
-      await fetch(SHEET_URL, {
+      const res = await fetch('/api/sendToSheet', {
         method: 'POST',
-        body: JSON.stringify(data),
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
       });
+      const result = await res.json();
+      console.log('Dados enviados:', result);
     } catch (err) {
       console.error('Erro ao enviar dados para Google Sheets:', err);
     }
@@ -71,13 +78,16 @@ export default function App() {
     setSuccessMessage(true);
     setTimeout(() => setSuccessMessage(false), 3000);
 
-    // Envia para Google Sheets
     sendToSheet(entry);
   };
 
   const imcBySexo = useMemo(() => {
     const map = {};
-    entries.forEach(e => { if (!map[e.sexo]) map[e.sexo] = { sexo: e.sexo, sum: 0, c: 0 }; map[e.sexo].sum += e.imc; map[e.sexo].c++; });
+    entries.forEach(e => {
+      if (!map[e.sexo]) map[e.sexo] = { sexo: e.sexo, sum: 0, c: 0 };
+      map[e.sexo].sum += e.imc;
+      map[e.sexo].c++;
+    });
     return Object.values(map).map(m => ({ sexo: m.sexo, avgImc: (m.sum / m.c).toFixed(2) }));
   }, [entries]);
 
@@ -93,6 +103,7 @@ export default function App() {
     <div className="app-bg">
       <motion.div initial={{ scale: 0.98, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring", stiffness: 100 }}
         className="main-card">
+
         <header className="header">
           <h1>Painel de Saúde IMC <span className="badge">Análise</span></h1>
           <div className="button-group">
