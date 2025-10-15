@@ -1,9 +1,8 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  BarChart, Bar, PieChart, Pie, Cell,
-  ScatterChart, Scatter, Legend
+  BarChart, Bar, PieChart, Pie, Cell, ScatterChart, Scatter, Legend
 } from 'recharts';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CheckCircle, Info, BarChart as BarChartIcon } from 'lucide-react';
@@ -12,6 +11,7 @@ import './index.css';
 const COLORS = ['#dc3545', '#ffc107', '#198754'];
 const PRIMARY_ACCENT = '#00897B';
 
+// Componente reutilizável de campo do formulário
 const FormField = ({ label, id, children, errors, tooltip = '' }) => (
   <div className="form-field">
     <div className="form-label-container">
@@ -30,20 +30,23 @@ const FormField = ({ label, id, children, errors, tooltip = '' }) => (
 export default function App() {
   const [successMessage, setSuccessMessage] = useState(false);
   const [view, setView] = useState('form');
+  const [entries, setEntries] = useState([]);
+
   const { register, handleSubmit, reset, formState: { errors } } = useForm({
-    defaultValues: { sexo: 'Masculino', idade: 25, peso: 70, altura: 1.75, diabetes: 'Não', hipertensao: 'Não', habitos: 'Moderado' }
+    defaultValues: {
+      sexo: 'Masculino',
+      idade: 25,
+      peso: 70,
+      altura: 1.75,
+      diabetes: 'Não',
+      hipertensao: 'Não',
+      habitos: 'Moderado'
+    }
   });
 
-  const [entries, setEntries] = useState(() => {
-    try { const raw = localStorage.getItem('imc_entries_v2'); return raw ? JSON.parse(raw) : []; } catch { return []; }
-  });
-
-  useEffect(() => { localStorage.setItem('imc_entries_v2', JSON.stringify(entries)); }, [entries]);
-
-  const calcIMC = (peso, altura) => Number((peso / (altura * altura)).toFixed(2));
-
+  // Funções de cálculo
+  const calcIMC = (p, a) => Number((p / (a * a)).toFixed(2));
   const imcCategoria = i => i < 18.5 ? 'Abaixo do peso' : i < 25 ? 'Normal' : i < 30 ? 'Sobrepeso' : 'Obesidade';
-
   const riskGroup = ({ idade, imc, diabetes, hipertensao, habitos }) => {
     let s = 0;
     if (idade >= 60) s += 3; else if (idade >= 45) s += 2; else if (idade >= 30) s += 1;
@@ -55,38 +58,64 @@ export default function App() {
     return s >= 6 ? 'Alto' : s >= 3 ? 'Moderado' : 'Baixo';
   };
 
-  // Função serverless
+  // Envia dados para Google Sheets via serverless
   const sendToSheet = async (data) => {
     try {
-      const res = await fetch('/api/sendToSheet', {
+      await fetch('/api/sendToSheet', {
         method: 'POST',
+        body: JSON.stringify(data),
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
       });
-      const result = await res.json();
-      console.log('Dados enviados:', result);
     } catch (err) {
       console.error('Erro ao enviar dados para Google Sheets:', err);
     }
   };
 
+  // Busca os dados do Google Sheets ao montar o componente
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const res = await fetch('/api/getSheetData');
+        const data = await res.json();
+        const formatted = data.map(d => ({
+          id: Number(d.id),
+          idade: Number(d.idade),
+          sexo: d.sexo,
+          peso: Number(d.peso),
+          altura: Number(d.altura),
+          diabetes: d.diabetes,
+          hipertensao: d.hipertensao,
+          habitos: d.habitos,
+          imc: Number(d.imc),
+          categoria: d.categoria,
+          risco: d.risco
+        }));
+        setEntries(formatted);
+      } catch (err) {
+        console.error('Erro ao buscar dados da planilha:', err);
+      }
+    };
+
+    fetchData();
+  }, []);
+
   const onSubmit = d => {
     const imc = calcIMC(d.peso, d.altura);
     const entry = { id: Date.now(), ...d, imc, categoria: imcCategoria(imc), risco: riskGroup({ ...d, imc }) };
-    setEntries(e => [entry, ...e].slice(0, 5000));
+    setEntries(e => [entry, ...e]);
     reset();
     setSuccessMessage(true);
     setTimeout(() => setSuccessMessage(false), 3000);
-
     sendToSheet(entry);
   };
 
+  // Dados para gráficos
   const imcBySexo = useMemo(() => {
     const map = {};
-    entries.forEach(e => {
-      if (!map[e.sexo]) map[e.sexo] = { sexo: e.sexo, sum: 0, c: 0 };
-      map[e.sexo].sum += e.imc;
-      map[e.sexo].c++;
+    entries.forEach(e => { 
+      if (!map[e.sexo]) map[e.sexo] = { sexo: e.sexo, sum: 0, c: 0 }; 
+      map[e.sexo].sum += e.imc; 
+      map[e.sexo].c++; 
     });
     return Object.values(map).map(m => ({ sexo: m.sexo, avgImc: (m.sum / m.c).toFixed(2) }));
   }, [entries]);
@@ -103,7 +132,6 @@ export default function App() {
     <div className="app-bg">
       <motion.div initial={{ scale: 0.98, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring", stiffness: 100 }}
         className="main-card">
-
         <header className="header">
           <h1>Painel de Saúde IMC <span className="badge">Análise</span></h1>
           <div className="button-group">
