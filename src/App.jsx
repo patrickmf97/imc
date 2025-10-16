@@ -3,12 +3,10 @@ import { useForm } from 'react-hook-form';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, ScatterChart, Scatter, Legend } from 'recharts';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CheckCircle, Info, BarChart as BarChartIcon } from 'lucide-react';
+import { db, imcCollection, addDoc, onSnapshot, query, orderBy, serverTimestamp } from './firebase';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
 import './index.css';
-
-// 1. IMPORTAÇÕES DO FIREBASE
-import { db, imcCollection, addDoc, onSnapshot, query, orderBy, serverTimestamp } from './firebase'; // Importa a referência da coleção e as funções
 
 const COLORS = ['#dc3545', '#ffc107', '#198754'];
 const PRIMARY_ACCENT = '#00897B';

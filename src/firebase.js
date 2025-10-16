@@ -1,7 +1,15 @@
 // Import the functions you need from the SDKs you need
-import { initializeApp } from "firebase/app";
-import { getAnalytics } from "firebase/analytics";
-// TODO: Add SDKs for Firebase products that you want to use
+import { initializeApp } from 'firebase/app';
+// 1. Mantenha todas as importações necessárias do 'firebase/firestore'
+import { 
+    getFirestore, 
+    collection, 
+    addDoc, 
+    onSnapshot, 
+    query, 
+    orderBy, 
+    serverTimestamp 
+} from 'firebase/firestore';// TODO: Add SDKs for Firebase products that you want to use
 // https://firebase.google.com/docs/web/setup#available-libraries
 
 // Your web app's Firebase configuration
@@ -15,9 +23,23 @@ const firebaseConfig = {
   appId: "1:944562211467:web:a0a025339e8185dfefa28e",
   measurementId: "G-R17WD0Z2XP"
 };
-
-// Initialize Firebase
+// Inicializa o Firebase
 const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
-// Exporta as referências à coleção
+
+// Exporta a instância do Firestore
+export const db = getFirestore(app);
+
+// Exporta a referência à coleção
 export const imcCollection = collection(db, 'imc_entries');
+
+// 2. EXPORTE AS FUNÇÕES DO FIRESTORE USADAS NO App.jsx
+// Isso resolve todos os erros de "No matching export"
+export { 
+    addDoc, 
+    onSnapshot, 
+    query, 
+    orderBy, 
+    serverTimestamp 
+};
+
+// As funções `collection` e `getFirestore` não precisam ser exportadas, pois são usadas apenas neste arquivo.
