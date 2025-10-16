@@ -7,10 +7,13 @@ import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
 import './index.css';
 
+// 1. IMPORTAÇÕES DO FIREBASE
+import { db, imcCollection, addDoc, onSnapshot, query, orderBy, serverTimestamp } from './firebase'; // Importa a referência da coleção e as funções
+
 const COLORS = ['#dc3545', '#ffc107', '#198754'];
 const PRIMARY_ACCENT = '#00897B';
 
-const SHEET_URL = 'https://imc-nine-delta.vercel.app/api/sendToSheet';
+// const SHEET_URL = 'https://imc-nine-delta.vercel.app/api/sendToSheet'; // Removido ou Ignorado
 
 const FormField = ({ label, id, children, errors, tooltip = '' }) => (
   <div className="form-field">
@@ -34,11 +37,8 @@ export default function App() {
     defaultValues: { sexo: 'Masculino', idade: 25, peso: 70, altura: 1.75, diabetes: 'Não', hipertensao: 'Não', habitos: 'Moderado' }
   });
 
-  const [entries, setEntries] = useState(() => {
-    try { const raw = localStorage.getItem('imc_entries_v2'); return raw ? JSON.parse(raw) : []; } catch { return []; }
-  });
-
-  useEffect(() => { localStorage.setItem('imc_entries_v2', JSON.stringify(entries)); }, [entries]);
+  // 2. Estado inicial vazio, pois os dados virão do Firebase
+  const [entries, setEntries] = useState([]);
 
   const calcIMC = (p, a) => Number((p / (a * a)).toFixed(2));
   const imcCategoria = i => i < 18.5 ? 'Abaixo do peso' : i < 25 ? 'Normal' : i < 30 ? 'Sobrepeso' : 'Obesidade';
@@ -50,28 +50,55 @@ export default function App() {
     return s >= 6 ? 'Alto' : s >= 3 ? 'Moderado' : 'Baixo';
   };
 
-  const sendToSheet = async (data) => {
+  // 4. FUNÇÃO DE SALVAMENTO NO FIRESTORE
+  const saveEntryToFirestore = async (data) => {
     try {
-      await fetch(SHEET_URL, {
-        method: 'POST',
-        body: JSON.stringify(data),
-        headers: { 'Content-Type': 'application/json' },
+      await addDoc(imcCollection, {
+        ...data,
+        createdAt: serverTimestamp(), // Adiciona um timestamp para ordenação
       });
+      // A atualização do estado 'entries' será feita pelo 'onSnapshot' no useEffect
     } catch (err) {
-      console.error('Erro ao enviar dados para Google Sheets:', err);
+      console.error('Erro ao salvar dados no Firestore:', err);
     }
   };
 
   const onSubmit = d => {
     const imc = calcIMC(d.peso, d.altura);
-    const entry = { id: Date.now(), ...d, imc, categoria: imcCategoria(imc), risco: riskGroup({ ...d, imc }) };
-    setEntries(e => [entry, ...e].slice(0, 5000));
+    const entry = { ...d, imc, categoria: imcCategoria(imc), risco: riskGroup({ ...d, imc }) };
+    
     reset();
     setSuccessMessage(true);
     setTimeout(() => setSuccessMessage(false), 3000);
 
-    sendToSheet(entry);
+    // Envia para o Firestore
+    saveEntryToFirestore(entry);
   };
+  
+  // 5. LISTENER DE DADOS EM TEMPO REAL (onSnapshot)
+  useEffect(() => {
+    const q = query(imcCollection, orderBy('createdAt', 'desc')); // Ordena por data de criação
+
+    // onSnapshot cria uma conexão em tempo real.
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const fetchedEntries = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        // Converte o timestamp para um formato JS ou ignora, dependendo da necessidade
+        createdAt: doc.data().createdAt ? doc.data().createdAt.toDate().toISOString() : null
+      })).slice(0, 5000); // Limita a 5000 registros para evitar sobrecarga
+      
+      setEntries(fetchedEntries);
+    }, (error) => {
+      console.error("Erro ao escutar o Firestore:", error);
+    });
+
+    // Retorna a função de limpeza (cleanup)
+    return () => unsubscribe();
+  }, []); // Executa apenas na montagem
+
+  // Funções de Cálculo (Mantidas)
+  // ... imcBySexo, riskDistribution, ageImcScatter (não requerem alterações se 'entries' for a fonte)
 
   const exportExcel = (entries) => {
     const ws = XLSX.utils.json_to_sheet(entries);
@@ -95,7 +122,9 @@ export default function App() {
 
   const ageImcScatter = useMemo(() => entries.map(e => ({ idade: e.idade, imc: e.imc, diabetes: e.diabetes })), [entries]);
 
+
   return (
+    // ... restante do código (mantido)
     <div className="app-bg">
       <motion.div initial={{ scale: 0.98, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring", stiffness: 100 }}
         className="main-card">
